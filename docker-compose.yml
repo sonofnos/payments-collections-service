@@ -1,0 +1,52 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: payments-postgres
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+    ports:
+      - "5437:5432" # host 5437 - 5432-5436 are used by other local projects on this machine
+    volumes:
+      - payments_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payments -d payments"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: payments-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  payments-collections-service:
+    build: .
+    container_name: payments-collections-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/payments
+      DB_USERNAME: payments
+      DB_PASSWORD: payments
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CORE_BANKING_BASE_URL: ${CORE_BANKING_BASE_URL:-http://host.docker.internal:8080}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod-this-must-be-at-least-32-bytes-long}
+      WEBHOOK_HMAC_SECRET: ${WEBHOOK_HMAC_SECRET:-change-me-webhook-secret}
+      PORT: 8081
+    ports:
+      - "8081:8081"
+
+volumes:
+  payments_pgdata:

@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: payments-collections-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5437/payments}
+    username: ${DB_USERNAME:payments}
+    password: ${DB_PASSWORD:payments}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+
+server:
+  port: ${PORT:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when-authorized
+
+core-banking:
+  base-url: ${CORE_BANKING_BASE_URL:http://localhost:8080}
+  connect-timeout: 3s
+  read-timeout: 5s
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:change-me-in-prod-this-must-be-at-least-32-bytes-long}
+    token-ttl: 1h
+
+webhook:
+  hmac-secret: ${WEBHOOK_HMAC_SECRET:change-me-webhook-secret}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    com.sonofnos.payments: INFO
