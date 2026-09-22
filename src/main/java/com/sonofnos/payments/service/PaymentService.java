@@ -77,8 +77,7 @@ public class PaymentService {
         }
 
         publish(payment);
-        processCollection(payment);
-        return payment;
+        return processCollection(payment);
     }
 
     /**
@@ -87,9 +86,21 @@ public class PaymentService {
      * to SETTLED) happens asynchronously when the payment gateway calls the
      * webhook back. If the debit itself fails, there's nothing to wait for.
      */
-    private void processCollection(Payment payment) {
+    private Payment processCollection(Payment payment) {
         payment.transitionTo(PaymentStatus.PROCESSING);
-        paymentRepository.saveAndFlush(payment);
+        // Must reassign, and the caller must use this method's *return
+        // value* rather than its own now-stale reference: saveAndFlush on an
+        // already-persisted entity goes through JPA merge(), which returns a
+        // different managed instance. Reassigning only the local `payment`
+        // parameter here is not enough - Java passes object references by
+        // value, so mutating a locally-rebound reference is invisible to the
+        // caller's own variable. Caught via a real HTTP smoke test against a
+        // deployed instance (with a real, sometimes-failing
+        // core-banking-service call): the response kept reporting PROCESSING
+        // even after the payment was correctly marked FAILED and saved,
+        // because initiateCollection() was still returning its own stale
+        // pre-failure reference.
+        payment = paymentRepository.saveAndFlush(payment);
         publish(payment);
 
         try {
@@ -100,9 +111,10 @@ public class PaymentService {
         } catch (AccountClientException e) {
             log.warn("Collection {} failed against core-banking-service: {}", payment.getId(), e.getMessage());
             payment.markFailed(e.getMessage());
-            paymentRepository.saveAndFlush(payment);
+            payment = paymentRepository.saveAndFlush(payment);
             publish(payment);
         }
+        return payment;
     }
 
     @Transactional(readOnly = true)
@@ -146,7 +158,7 @@ public class PaymentService {
         }
 
         try {
-            paymentRepository.saveAndFlush(payment);
+            payment = paymentRepository.saveAndFlush(payment);
         } catch (org.springframework.orm.ObjectOptimisticLockingFailureException e) {
             log.info("Lost race to settle payment {} concurrently, returning current state", paymentId);
             return getById(paymentId);

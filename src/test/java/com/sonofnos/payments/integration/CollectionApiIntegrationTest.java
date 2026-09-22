@@ -1,6 +1,8 @@
 package com.sonofnos.payments.integration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.sonofnos.payments.client.AccountClient;
+import com.sonofnos.payments.client.FakeAccountClient;
 import com.sonofnos.payments.security.JwtIssuerService;
 import com.sonofnos.payments.service.WebhookSignatureService;
 import com.sonofnos.payments.web.dto.CollectionRequest;
@@ -28,6 +30,8 @@ class CollectionApiIntegrationTest extends AbstractIntegrationTest {
     private WebhookSignatureService webhookSignatureService;
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private AccountClient accountClient;
 
     private MockMvc mockMvc() {
         return MockMvcBuilders.webAppContextSetup(webApplicationContext)
@@ -109,6 +113,33 @@ class CollectionApiIntegrationTest extends AbstractIntegrationTest {
                         .content(webhookBody))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SETTLED"));
+    }
+
+    /**
+     * Real-Postgres regression test for a bug the MockMvc-with-mocked-repository
+     * unit tests couldn't catch: on a debit failure, PaymentService used to save
+     * the payment a second time without reassigning the entity returned by the
+     * first saveAndFlush (JPA merge() returns a *different* managed instance),
+     * so the second save carried a stale @Version and Hibernate rejected it as
+     * a lost update - a 500 on a perfectly ordinary, single-request failure
+     * path, only visible against a real Hibernate merge, not a stubbed one.
+     */
+    @Test
+    void debitFailureAgainstRealPostgresDoesNotThrowStaleVersionError() throws Exception {
+        String failingDebtor = "failing-debtor-" + System.nanoTime();
+        ((FakeAccountClient) accountClient).makeAccountFail(failingDebtor);
+
+        CollectionRequest request = new CollectionRequest(
+                "fail-key-" + System.nanoTime(), failingDebtor, "creditor-1",
+                new BigDecimal("20.00"), "USD", null);
+
+        mockMvc().perform(post("/api/collections")
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.failureReason").value(org.hamcrest.Matchers.containsString("simulated failure")));
     }
 
     @Test
